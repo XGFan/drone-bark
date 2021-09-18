@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -10,6 +11,15 @@ import (
 	"strconv"
 	"strings"
 )
+
+type Env map[string]string
+
+func (e Env) render(s string) string {
+	for k, v := range e {
+		s = strings.ReplaceAll(s, fmt.Sprintf("{%s}", k), v)
+	}
+	return s
+}
 
 type BarkConfig struct {
 	Server string
@@ -27,7 +37,7 @@ type BarkConfig struct {
 	Copy  string
 }
 
-func (b *BarkConfig) GetUrl() *url.URL {
+func (b *BarkConfig) GetUrl(env Env) *url.URL {
 	if b.Server == "" {
 		b.Server = "https://api.day.app"
 	}
@@ -35,6 +45,8 @@ func (b *BarkConfig) GetUrl() *url.URL {
 	if b.Token == "" {
 		log.Fatalf("token is empty")
 	}
+	b.Title = env.render(b.Title)
+	b.Content = env.render(b.Content)
 	if b.Title != "" {
 		path = fmt.Sprintf("%s/%s/%s", b.Token, b.Title, b.Content)
 	} else {
@@ -96,10 +108,35 @@ func getConfigFromEnv(data interface{}) {
 	}
 }
 
+func loadEnv() Env {
+	env := make(map[string]string)
+	environ := os.Environ()
+	for _, s := range environ {
+		i := strings.IndexRune(s, '=')
+		env[s[:i]] = s[i+1:]
+	}
+	file, err := ioutil.ReadFile("/run/drone/env")
+	if err == nil {
+		s := string(file)
+		split := strings.Split(s, "\n")
+		for _, s2 := range split {
+			i := strings.IndexRune(s2, '=')
+			env[s2[:i]] = s2[i+1:]
+		}
+	}
+	return env
+}
+
 func main() {
+	env := loadEnv()
+	if _, ok := env["debug"]; ok {
+		for k, v := range env {
+			log.Printf("%s = %s", k, v)
+		}
+	}
 	config := BarkConfig{}
 	getConfigFromEnv(&config)
-	resp, err := http.Get(config.GetUrl().String())
+	resp, err := http.Get(config.GetUrl(env).String())
 	if err != nil {
 		log.Fatalf("request bark server error %+v", err)
 	}
