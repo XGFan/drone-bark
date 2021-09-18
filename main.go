@@ -110,18 +110,17 @@ func getConfigFromEnv(data interface{}) {
 
 func loadEnv() Env {
 	env := make(map[string]string)
+	trans := func(s string) {
+		i := strings.IndexRune(s, '=')
+		env[s[:i]] = strings.Trim(s[i+1:], "\"")
+	}
 	environ := os.Environ()
 	for _, s := range environ {
-		i := strings.IndexRune(s, '=')
-		env[s[:i]] = s[i+1:]
+		trans(s)
 	}
-	file, err := ioutil.ReadFile("/run/drone/env")
-	if err == nil {
-		s := string(file)
-		split := strings.Split(s, "\n")
-		for _, s2 := range split {
-			i := strings.IndexRune(s2, '=')
-			env[s2[:i]] = s2[i+1:]
+	if file, err := ioutil.ReadFile("/run/drone/env"); err == nil {
+		for _, s := range strings.Split(string(file), "\n") {
+			trans(s)
 		}
 	}
 	return env
