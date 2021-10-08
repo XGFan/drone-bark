@@ -7,18 +7,39 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"reflect"
-	"strconv"
 	"strings"
 )
 
 type Env map[string]string
 
-func (e Env) render(s string) string {
-	for k, v := range e {
+var EnvSeparator = "_"
+
+func (env Env) render(s string) string {
+	for k, v := range env {
 		s = strings.ReplaceAll(s, fmt.Sprintf("{%s}", k), v)
 	}
 	return s
+}
+
+func (env Env) Lookup(keys []string) (string, bool) {
+	key := strings.Join(keys, EnvSeparator)
+	for k, v := range env {
+		if strings.ToUpper(k) == strings.ToUpper(key) {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func (env Env) FindPrefix(keys []string) map[string]string {
+	key := strings.Join(keys, EnvSeparator)
+	m := make(map[string]string, 0)
+	for k, v := range env {
+		if strings.HasPrefix(k, key) {
+			m[k[len(key):]] = v
+		}
+	}
+	return m
 }
 
 type BarkConfig struct {
@@ -27,14 +48,18 @@ type BarkConfig struct {
 	//
 	Content string
 	Title   string
-	//
-	AutoCopy bool
+	RequestArg
+}
+
+type RequestArg struct {
 	Archive  bool
+	AutoCopy bool
 	//
 	Sound string
 	Group string
 	Url   string
 	Copy  string
+	Icon  string
 }
 
 func (b *BarkConfig) GetUrl(env Env) *url.URL {
@@ -79,33 +104,11 @@ func (b *BarkConfig) GetUrl(env Env) *url.URL {
 	if b.Copy != "" {
 		query.Set("copy", b.Copy)
 	}
+	if b.Icon != "" {
+		query.Set("icon", b.Copy)
+	}
 	parsedUrl.RawQuery = query.Encode()
 	return parsedUrl
-}
-
-func getConfigFromEnv(data interface{}) {
-	dataType := reflect.TypeOf(data).Elem()
-	v := reflect.ValueOf(data).Elem()
-	for i := 0; i < dataType.NumField(); i++ {
-		field := dataType.Field(i)
-		envName := fmt.Sprintf("PLUGIN_%s", strings.ToUpper(field.Name))
-		//fmt.Println(envName)
-		env, found := os.LookupEnv(envName)
-		if !found {
-			continue
-		}
-		switch field.Type.String() {
-		case "string":
-			v.Field(i).Set(reflect.ValueOf(env))
-		case "bool":
-			parseBool, err := strconv.ParseBool(env)
-			if err == nil {
-				v.Field(i).Set(reflect.ValueOf(parseBool))
-			}
-		default:
-			log.Printf("unknow type %s with env %v", field.Type.String(), env)
-		}
-	}
 }
 
 func loadEnv() Env {
@@ -134,7 +137,10 @@ func main() {
 		}
 	}
 	config := BarkConfig{}
-	getConfigFromEnv(&config)
+	err := Parse(env, &config, []string{"PLUGIN"})
+	if err != nil {
+		log.Fatal("fail parse", err)
+	}
 	resp, err := http.Get(config.GetUrl(env).String())
 	if err != nil {
 		log.Fatalf("request bark server error %+v", err)
